@@ -50,10 +50,12 @@ pattern is ambiguous or missing. Other versions are rejected, not guessed at.
 
    This is a modification that defeats the client's own integrity check. See
    the legal note below before distributing or using it.
-5. **`--allow-local-ranges`:** on ARM64, bypasses the client's private-IPv4
-   connect filters so a LAN server is reachable. On x86 no binary change is
-   made; the tool prints the workaround (use an IPv4-mapped IPv6 `serverHost`
-   such as `::ffff:192.168.1.10` in the bootstrap settings).
+5. **`--allow-local-ranges`:** allows private-IPv4 servers on both ABIs. On
+   x86, an unchecked `getaddrinfo` PLT entry is redirected to a wrapper that
+   expands filtered IPv4 results into IPv4-mapped IPv6 results in Bionic's
+   inline `sockaddr_storage`; both integrity-checked connect routines stay
+   byte-identical. On ARM64, both connect filters are bypassed while their
+   integrity checks read pristine copies.
 6. **`--bootstrap-url`:** rewrites the native `/env_settings` bootstrap URL to
    your base URL (`scheme://host[:port]`). The new `host:port` must not be longer
    than the original.
@@ -104,9 +106,6 @@ installed on top of, the original; uninstall the original first.
 
 - `--port` is broken on ARM64: the patcher writes the port, but the client
   ignores it and always connects to 9339.
-- `--allow-local-ranges` does not work on x86: the patcher prints a
-  workaround, but the client ignores it and always rejects private-IPv4
-  addresses.
 
 ## Tests
 

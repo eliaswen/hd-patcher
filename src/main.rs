@@ -40,11 +40,9 @@ struct Args {
     #[arg(long)]
     server_public_key: Option<String>,
 
-    /// ARM64: bypass the native private-IPv4 address filters in both game TCP
-    /// connect paths. x86: the client integrity-checks its connect path, so no
-    /// binary bypass is applied; instead the env's `serverHost` must be the
-    /// IPv4-mapped IPv6 form (`::ffff:a.b.c.d`), which the AF_INET-only filter
-    /// skips. Requires --server-public-key.
+    /// Bypass the native private-IPv4 address filters in both game TCP connect
+    /// paths. On x86 this wraps getaddrinfo; on ARM64 it patches both filters
+    /// while preserving their integrity-check bytes. Requires --server-public-key.
     #[arg(long)]
     allow_local_ranges: bool,
 
@@ -80,7 +78,6 @@ fn main() -> Result<()> {
     let native = match args.server_public_key.as_deref() {
         Some(hex) => Some(native::Options {
             key: native::parse_key(hex)?,
-            host: args.host.clone(),
             allow_local_ranges: args.allow_local_ranges,
             bootstrap_url: args.bootstrap_url.clone(),
         }),

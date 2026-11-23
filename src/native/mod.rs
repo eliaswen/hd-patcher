@@ -3,7 +3,7 @@
 //! - [`key`]: replaces the embedded server public key (all ABIs).
 //! - [`arm64`]: the extra work arm64-v8a needs (integrity-check handling,
 //!   local-range filter bypass, bootstrap URL rewrite).
-//! - [`x86`]: x86 local-range validation and bootstrap URL rewrite.
+//! - [`x86`]: x86 local-range resolver wrapper and bootstrap URL rewrite.
 //!
 //! [`patch_library`] is the single entry point used by the APK repackager.
 
@@ -42,8 +42,6 @@ pub fn is_libg(name: &str) -> bool {
 pub struct Options {
     /// Replacement server public key (X25519, 32 bytes).
     pub key: [u8; 32],
-    /// Server host; only used to word the x86 local-range hint.
-    pub host: String,
     pub allow_local_ranges: bool,
     /// Replacement base (`scheme://host[:port]`) for the native bootstrap URL.
     pub bootstrap_url: Option<String>,
@@ -77,15 +75,9 @@ pub fn patch_library(
             }
             Abi::X86 => {
                 x86::allow_local_ranges(data)?;
-                let mapped = options
-                    .host
-                    .parse::<std::net::Ipv4Addr>()
-                    .map(|ip| format!("::ffff:{ip}"))
-                    .unwrap_or_else(|_| "::ffff:<server IPv4>".to_string());
                 notes.push(format!(
-                    "{name}: x86 connect path is integrity-checked; no binary bypass applied. \
-                     Set serverHost to \"{mapped}\" in env_settings: the v4-mapped IPv6 \
-                     address skips the AF_INET-only private-range filter."
+                    "{name}: wrapped getaddrinfo (0x74e70) to map filtered private-IPv4 \
+                     results to IPv6; both integrity-checked connect routines remain pristine"
                 ));
             }
         }

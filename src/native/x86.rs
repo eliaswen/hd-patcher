@@ -2,29 +2,18 @@
 //!
 //! ## Local ranges
 //!
-//! The x86 build integrity-checks the game connect path: editing the filter in
-//! `0x3b4bb0`, retargeting its vtable slot, or even redirecting the slot to a
-//! byte-identical relocated clone crashes the client in the GL thread (proven
-//! live on Waydroid). The filter itself is AF_INET-only:
+//! Both game connect routines reject private IPv4 results before `connect()`.
+//! Their code is integrity-checked, but the `getaddrinfo@plt` entry at
+//! `0x74e70` is not. The bypass therefore leaves both routines untouched and
+//! redirects that PLT entry to a 163-byte wrapper in the extended RX segment.
 //!
-//! ```text
-//! 3b4c00  mov eax,[esi+4]     ; ai_family
-//! 3b4c03  cmp eax,2
-//! 3b4c06  jne 3b4c50          ; non-IPv4 -> socket()/connect() directly
-//! ...
-//! 3b4c11  cmp edx,0xa         ; 10.0.0.0/8   -> skip
-//! 3b4c1a  cmp edx,0x7f        ; 127.0.0.0/8  -> skip
-//! 3b4c26  cmp edx,0xac        ; 172.16/12    -> skip
-//! 3b4c37  cmp ecx,0xc0a8      ; 192.168/16   -> skip
-//! ```
-//!
-//! Therefore the supported bypass is data-only: advertise the server as an
-//! IPv4-mapped IPv6 address (`::ffff:a.b.c.d`). `getaddrinfo` returns family 10,
-//! the `jne` skips every IPv4 range check, and the kernel routes the v4-mapped
-//! connect over IPv4. Verified on Waydroid: TCP established and the farm loaded.
-//!
-//! `allow_local_ranges` deliberately does not modify the library; it validates
-//! that the expected filter and IPv6 fast path are present.
+//! The wrapper calls the original `getaddrinfo` through its GOT slot, then
+//! expands each filtered AF_INET result's `sockaddr_in` in place into an
+//! IPv4-mapped `sockaddr_in6`. Bionic backs `ai_addr` with an inline
+//! `sockaddr_storage`, so no allocation or free is needed. The native
+//! AF_INET6 fast path skips the range checks and the kernel routes the mapped
+//! address over IPv4. Only 10/8, 127/8, 172.0-31.x and 192.168/16 are changed;
+//! public IPv4 and native IPv6 results pass through unchanged.
 //!
 //! ## Bootstrap URL
 //!
@@ -54,8 +43,29 @@ use anyhow::{bail, ensure, Result};
 
 use super::{put_u32, u32_at};
 
+const GETADDRINFO_PLT: usize = 0x74_e70;
+const GETADDRINFO_PLT_BYTES: [u8; 6] = [0xff, 0xa3, 0xe4, 0x01, 0x00, 0x00];
 const FAMILY_CHECK: usize = 0x3b_4c03;
-const FILTER: usize = 0x3b_4c11;
+const FILTER_A: usize = 0x3b_4c11;
+const FILTER_B: usize = 0x47_8582;
+
+/// Position-independent getaddrinfo wrapper, linked at `WRAPPER_OFF`.
+/// `ebx` is the client's usual PIC base (`0xb4fb48`), so +0x1e4 selects the
+/// original getaddrinfo GOT entry.
+const WRAPPER_OFF: usize = 0xb0_d400;
+const WRAPPER: [u8; 163] = [
+    0x55, 0x89, 0xe5, 0x53, 0x56, 0x57, 0x83, 0xec, 0x0c, 0xe8, 0x00, 0x00, 0x00, 0x00, 0x5b, 0x81,
+    0xc3, 0x3a, 0x27, 0x04, 0x00, 0xff, 0x75, 0x14, 0xff, 0x75, 0x10, 0xff, 0x75, 0x0c, 0xff, 0x75,
+    0x08, 0xff, 0x93, 0xe4, 0x01, 0x00, 0x00, 0x83, 0xc4, 0x10, 0x85, 0xc0, 0x75, 0x6d, 0x8b, 0x75,
+    0x14, 0x8b, 0x36, 0x85, 0xf6, 0x74, 0x62, 0x83, 0x7e, 0x04, 0x02, 0x75, 0x57, 0x8b, 0x4e, 0x18,
+    0x8b, 0x51, 0x04, 0x80, 0xfa, 0x0a, 0x74, 0x16, 0x80, 0xfa, 0x7f, 0x74, 0x11, 0x66, 0x81, 0xfa,
+    0xc0, 0xa8, 0x74, 0x0a, 0x80, 0xfa, 0xac, 0x75, 0x3b, 0xf6, 0xc6, 0xe0, 0x75, 0x36, 0x89, 0xcf,
+    0x66, 0x8b, 0x4f, 0x02, 0x89, 0x55, 0xf0, 0x0f, 0x57, 0xc0, 0x0f, 0x11, 0x07, 0x0f, 0x11, 0x47,
+    0x0c, 0x66, 0xc7, 0x07, 0x0a, 0x00, 0x66, 0x89, 0x4f, 0x02, 0x8b, 0x55, 0xf0, 0x89, 0x57, 0x14,
+    0x66, 0xc7, 0x47, 0x12, 0xff, 0xff, 0xc7, 0x46, 0x04, 0x0a, 0x00, 0x00, 0x00, 0xc7, 0x46, 0x10,
+    0x1c, 0x00, 0x00, 0x00, 0x8b, 0x76, 0x1c, 0xeb, 0x9a, 0x31, 0xc0, 0x83, 0xc4, 0x0c, 0x5f, 0x5e,
+    0x5b, 0x5d, 0xc3,
+];
 
 const LEA_ALT: usize = 0x53_dac7;
 const LEA_DEFAULT: usize = 0x53_dacd;
@@ -70,15 +80,41 @@ const RX_MEMSZ: usize = 0x68;
 const RX_OLD_END: u32 = 0xb0_d1e8;
 const RX_RW_START: usize = 0xb0_e0d0; // RW segment file start, gap must not reach it
 
-pub fn allow_local_ranges(data: &[u8]) -> Result<()> {
+pub fn allow_local_ranges(data: &mut [u8]) -> Result<()> {
+    ensure!(
+        data[GETADDRINFO_PLT..GETADDRINFO_PLT + 6] == GETADDRINFO_PLT_BYTES,
+        "unexpected x86 getaddrinfo PLT entry at 0x74e70"
+    );
     ensure!(
         data[FAMILY_CHECK..FAMILY_CHECK + 5] == [0x83, 0xf8, 0x02, 0x75, 0x48],
         "unexpected x86 connect family check at 0x3b4c03"
     );
     ensure!(
-        data[FILTER..FILTER + 3] == [0x83, 0xfa, 0x0a],
+        data[FILTER_A..FILTER_A + 3] == [0x83, 0xfa, 0x0a],
         "unexpected x86 private-IPv4 filter at 0x3b4c11"
     );
+    ensure!(
+        data[FILTER_B..FILTER_B + 6] == [0x81, 0xfa, 0xac, 0x00, 0x00, 0x00],
+        "unexpected x86 private-IPv4 filter at 0x478582"
+    );
+    ensure!(
+        u32_at(data, RX_FILESZ) == RX_OLD_END && u32_at(data, RX_MEMSZ) == RX_OLD_END,
+        "local-range bypass requires the pristine x86 RX segment sizes"
+    );
+    let wrapper_end = WRAPPER_OFF + WRAPPER.len();
+    ensure!(wrapper_end <= RX_RW_START, "x86 wrapper exceeds the RX gap");
+    ensure!(
+        data[WRAPPER_OFF..wrapper_end].iter().all(|&b| b == 0),
+        "x86 wrapper space is not zero-filled"
+    );
+
+    data[WRAPPER_OFF..wrapper_end].copy_from_slice(&WRAPPER);
+    data[GETADDRINFO_PLT] = 0xe9;
+    let displacement = (WRAPPER_OFF as i64 - (GETADDRINFO_PLT + 5) as i64) as i32;
+    put_u32(data, GETADDRINFO_PLT + 1, displacement as u32);
+    data[GETADDRINFO_PLT + 5] = 0x90;
+    put_u32(data, RX_FILESZ, wrapper_end as u32);
+    put_u32(data, RX_MEMSZ, wrapper_end as u32);
     Ok(())
 }
 
@@ -91,8 +127,11 @@ pub fn patch_bootstrap_url(data: &mut [u8], base_url: &str) -> Result<()> {
         data[LEA_DEFAULT..LEA_DEFAULT + 6] == LEA_DEFAULT_BYTES,
         "unexpected default bootstrap lea at 0x53dacd"
     );
+    let rx_end = u32_at(data, RX_FILESZ);
     ensure!(
-        u32_at(data, RX_FILESZ) == RX_OLD_END && u32_at(data, RX_MEMSZ) == RX_OLD_END,
+        rx_end == u32_at(data, RX_MEMSZ)
+            && rx_end >= RX_OLD_END
+            && (rx_end as usize) <= RX_RW_START,
         "unexpected x86 RX segment sizes"
     );
 
@@ -125,8 +164,9 @@ pub fn patch_bootstrap_url(data: &mut [u8], base_url: &str) -> Result<()> {
     let disp = (BOOTSTRAP_STR as i64 - PIC_BASE as i64) as i32 as u32;
     put_u32(data, LEA_ALT + 2, disp);
     put_u32(data, LEA_DEFAULT + 2, disp);
-    put_u32(data, RX_FILESZ, end as u32);
-    put_u32(data, RX_MEMSZ, end as u32);
+    let new_end = end.max(rx_end as usize);
+    put_u32(data, RX_FILESZ, new_end as u32);
+    put_u32(data, RX_MEMSZ, new_end as u32);
     Ok(())
 }
 
@@ -139,10 +179,35 @@ mod tests {
     }
 
     #[test]
-    fn verifies_filter_and_ipv6_fast_path() {
-        let Some(data) = original() else { return };
-        allow_local_ranges(&data).unwrap();
-        assert_eq!(&data[FILTER..FILTER + 3], &[0x83, 0xfa, 0x0a]);
+    fn local_range_bypass_wraps_getaddrinfo_without_touching_connect_code() {
+        let Some(mut data) = original() else { return };
+        let pristine = data.clone();
+        allow_local_ranges(&mut data).unwrap();
+
+        // The integrity-checked connect routines stay byte-identical.
+        assert_eq!(&data[0x3b4bb0..0x3b50f8], &pristine[0x3b4bb0..0x3b50f8]);
+        assert_eq!(&data[0x478250..0x47880e], &pristine[0x478250..0x47880e]);
+        assert_eq!(&data[WRAPPER_OFF..WRAPPER_OFF + WRAPPER.len()], &WRAPPER);
+        assert_eq!(data[GETADDRINFO_PLT], 0xe9);
+        assert_eq!(data[GETADDRINFO_PLT + 5], 0x90);
+        let displacement = u32_at(&data, GETADDRINFO_PLT + 1) as i32 as i64;
+        assert_eq!(
+            (GETADDRINFO_PLT as i64 + 5 + displacement) as usize,
+            WRAPPER_OFF
+        );
+        assert_eq!(
+            u32_at(&data, RX_FILESZ),
+            (WRAPPER_OFF + WRAPPER.len()) as u32
+        );
+
+        // The two RX-gap edits compose in normal patch_library order.
+        patch_bootstrap_url(&mut data, "http://192.168.240.1:18082").unwrap();
+        assert_eq!(&data[WRAPPER_OFF..WRAPPER_OFF + WRAPPER.len()], &WRAPPER);
+        assert_eq!(
+            u32_at(&data, RX_FILESZ),
+            (WRAPPER_OFF + WRAPPER.len()) as u32
+        );
+        assert_eq!(u32_at(&data, RX_MEMSZ), u32_at(&data, RX_FILESZ));
     }
 
     #[test]
