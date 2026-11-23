@@ -16,6 +16,14 @@ used here only to describe what the tool is compatible with.
 - No server. This tool only modifies the client package.
 - No patched APKs, key material or download links.
 
+## Notice
+
+This project does not comply with Supercell's Terms of Service, which prohibit
+reverse engineering or modifying the client. It is intended only for
+interoperability, educational and research purposes. You are responsible for
+complying with your local laws and regulations. See the
+[legal notice](LEGAL.md) for more information.
+
 ## Supported build
 
 Hay Day **1.43.150, build 1598**, ABIs `x86` and `arm64-v8a`.
@@ -94,8 +102,11 @@ installed on top of, the original; uninstall the original first.
 
 ## Limitations
 
-- --port is broken on ARM64. The patcher will write the port, but the client ignores it and always connects to 9339.
-- --allow-local-ranges does not work on x86. The patcher will print a workaround, but the client ignores it and always rejects private-IPv4 addresses.
+- `--port` is broken on ARM64: the patcher writes the port, but the client
+  ignores it and always connects to 9339.
+- `--allow-local-ranges` does not work on x86: the patcher prints a
+  workaround, but the client ignores it and always rejects private-IPv4
+  addresses.
 
 ## Tests
 
@@ -109,7 +120,9 @@ copies: `HD_ARM64_APK` (arm64 APK), `HD_X86_LIBG` and `HD_ARM64_LIBG`
 
 ## AI Usage
 
-This project was almost exclusively written by AI. AI was used to generate code, comments, and documentation, but I reviewed everything. Still, some people are uncomfortable using AI-written code, so I'm pointing that out.
+This project was almost exclusively written by AI, including code, comments and
+documentation. I reviewed everything, but since some people are uncomfortable
+with AI-written code, I'm pointing it out.
 
 ### Details
 
@@ -118,14 +131,7 @@ This project was almost exclusively written by AI. AI was used to generate code,
 - Claude Sonnet 5.5: documentation, review, and some patcher code
 - Human: review, testing, and writing some of this README
 
-All models were run through Hermes with access to REA, Ghidra, Waydroid, and an ARM64 android emulator.
-
-## Legal notice
-
-This is provided for interoperability, research and preservation, and
-comes with no warranty (see [LICENSE](LICENSE)). You are responsible for
-complying with the laws that apply to you, including copyright, the terms of
-service of the software, and rules on circumventing technical protection
-measures. Do not use it to access services you are not authorized to use, to
-obtain paid content without paying, or against a third party's servers.
-Only use it with an APK you are entitled to use.
+All models were run through [Hermes](https://github.com/NousResearch/hermes-agent)
+with access to [REA (Reverse Engineer Anything)](https://github.com/morluto/rea),
+[Ghidra](https://github.com/NationalSecurityAgency/ghidra),
+[Waydroid](https://github.com/waydroid/waydroid), and an ARM64 Android emulator.
