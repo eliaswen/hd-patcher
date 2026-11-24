@@ -3,3 +3,4 @@
 *.idsig
 *.keystore
 *.so
+/apks

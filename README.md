@@ -106,6 +106,7 @@ installed on top of, the original; uninstall the original first.
 
 - `--port` is broken on ARM64: the patcher writes the port, but the client
   ignores it and always connects to 9339.
+- The game occasionally instantly crashes on startup on x86, right after the supercell logo, or during the "loading..." menu. This is fixed by simply restarting the app, sometimes multiple times. The reason for the crash is unknown,but it's probably some kind of rarely activated undefeated security check. No similar startup crash has been observed on ARM64.
 
 ## Tests
 
