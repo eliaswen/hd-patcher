@@ -1,6 +1,6 @@
 [package]
 name = "hd-patcher"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2024"
 license = "MIT"
 description = "Repackage and sign a Hay Day APK so it connects to a custom server"

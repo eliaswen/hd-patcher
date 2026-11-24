@@ -9,6 +9,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::native::{self, Abi};
+use crate::progress::{self, Bar};
 
 /// What to change in the APK.
 pub struct Options {
@@ -20,7 +21,6 @@ pub struct Options {
 }
 
 pub struct Report {
-    pub total: usize,
     pub edits: Vec<String>,
 }
 
@@ -38,9 +38,13 @@ pub fn repackage(src: &Path, dst: &Path, options: &Options) -> Result<Report> {
     let mut total = 0usize;
     let mut patched_native = false;
 
-    for i in 0..zip.len() {
+    let count = zip.len();
+    let mut bar = Bar::new(count);
+
+    for i in 0..count {
         let mut entry = zip.by_index(i)?;
         let name = entry.name()?.into_owned();
+        bar.update(i, &name);
 
         // Drop prior signature material.
         if is_signature_file(&name) {
@@ -54,15 +58,17 @@ pub fn repackage(src: &Path, dst: &Path, options: &Options) -> Result<Report> {
         if name == "assets/settings_template.csv" {
             match rewrite_settings_csv(&data, &options.host, options.port) {
                 Some(new) => {
-                    edits.push(format!(
+                    let note = format!(
                         "assets/settings_template.csv ServerURL->{} Port->{}",
                         options.host, options.port
-                    ));
+                    );
+                    bar.println(&format!("      edit: {note}"));
+                    edits.push(note);
                     data = new;
                 }
                 None => {
-                    eprintln!(
-                        "WARN: could not locate ServerURL/Port columns in settings_template.csv"
+                    bar.println(
+                        "      WARN: could not locate ServerURL/Port columns in settings_template.csv",
                     );
                 }
             }
@@ -70,12 +76,12 @@ pub fn repackage(src: &Path, dst: &Path, options: &Options) -> Result<Report> {
 
         if let Some(native_options) = &options.native {
             if let Some(abi) = Abi::from_entry(&name) {
-                edits.extend(native::patch_library(
-                    abi,
-                    &name,
-                    &mut data,
-                    native_options,
-                )?);
+                bar.update(i, &format!("patching {name}"));
+                let notes = native::patch_library(abi, &name, &mut data, native_options)?;
+                for note in &notes {
+                    bar.println(&format!("      edit: {note}"));
+                }
+                edits.extend(notes);
                 patched_native = true;
             } else if native::is_libg(&name) {
                 bail!("native server key patch is not implemented for {name}");
@@ -101,12 +107,19 @@ pub fn repackage(src: &Path, dst: &Path, options: &Options) -> Result<Report> {
         writer.write_all(&data)?;
         total += 1;
     }
+    bar.update(count, "finalizing");
 
     if options.native.is_some() && !patched_native {
         bail!("APK has no supported (x86 or arm64-v8a) libg.so to patch");
     }
-    writer.finish()?;
-    Ok(Report { total, edits })
+    let out_file = writer.finish()?;
+    let size = out_file.metadata().map(|m| m.len()).unwrap_or(0);
+    let elapsed = bar.finish();
+    progress::done(
+        &format!("repackaged {total} entries ({})", progress::fmt_bytes(size)),
+        elapsed,
+    );
+    Ok(Report { edits })
 }
 
 fn is_signature_file(name: &str) -> bool {

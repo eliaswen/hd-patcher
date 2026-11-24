@@ -7,9 +7,11 @@
 
 mod apk;
 mod native;
+mod progress;
 mod signing;
 
 use std::path::PathBuf;
+use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -70,6 +72,7 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    let started = Instant::now();
 
     if !args.apk.exists() {
         bail!("input APK does not exist: {}", args.apk.display());
@@ -92,6 +95,9 @@ fn main() -> Result<()> {
         }
     };
 
+    println!("hd-patcher: {} -> {}", args.apk.display(), args.out.display());
+    progress::info(&format!("target {}:{}", args.host, args.port));
+
     // 1. Repackage into an unsigned, patched APK (old signature stripped).
     let unsigned = args.out.with_extension("unsigned.apk");
     let options = apk::Options {
@@ -99,12 +105,9 @@ fn main() -> Result<()> {
         port: args.port,
         native,
     };
+    progress::step(1, 2, "Repackaging APK");
     let report = apk::repackage(&args.apk, &unsigned, &options).context("repackaging APK")?;
 
-    println!("Repackaged {} entries.", report.total);
-    for note in &report.edits {
-        println!("  edit: {note}");
-    }
     if report.edits.is_empty() {
         bail!("no redirection edit was applied — refusing to produce an APK that still points at the original servers");
     }
@@ -115,10 +118,17 @@ fn main() -> Result<()> {
         password: args.storepass,
         alias: args.alias,
     };
+    progress::step(2, 2, "Aligning and signing");
+    let sign_start = Instant::now();
     signing::sign(&unsigned, &args.out, &keystore)?;
     let _ = std::fs::remove_file(&unsigned);
+    progress::done("signed", sign_start.elapsed());
 
-    println!("\nPatched + signed APK: {}", args.out.display());
+    println!(
+        "\nDone in {}. Patched + signed APK: {}",
+        progress::fmt_duration(started.elapsed()),
+        args.out.display()
+    );
     println!("Configured CSV endpoint: {}:{}", args.host, args.port);
     if let Some(base) = &args.bootstrap_url {
         println!("Bootstrap /env_settings will be fetched from {base}");

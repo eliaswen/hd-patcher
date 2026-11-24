@@ -9,6 +9,8 @@ use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 
+use crate::progress;
+
 /// Signing identity; created with `keytool` on first use if the file is absent.
 pub struct Keystore {
     pub path: PathBuf,
@@ -25,6 +27,7 @@ pub fn sign(unsigned: &Path, out: &Path, ks: &Keystore) -> Result<()> {
             // zipalign must run before apksigner (apksigner preserves alignment).
             let aligned = out.with_extension("aligned.apk");
             if let Some(zipalign) = find_build_tool("zipalign") {
+                progress::info("aligning with zipalign…");
                 run(
                     Command::new(&zipalign)
                         .args(["-p", "-f", "4"])
@@ -33,18 +36,21 @@ pub fn sign(unsigned: &Path, out: &Path, ks: &Keystore) -> Result<()> {
                     "zipalign",
                 )?;
             } else {
+                progress::info("zipalign not found — skipping alignment");
                 std::fs::copy(unsigned, &aligned)?;
             }
+            progress::info("signing with apksigner (v1+v2+v3)…");
             sign_apksigner(&apksigner, &aligned, out, &ks.path, &ks.password, &ks.alias)
                 .context("signing APK (apksigner)")?;
             let _ = std::fs::remove_file(&aligned);
-            println!("Signed with apksigner (v1+v2+v3).");
+            progress::info("signed with apksigner (v1+v2+v3)");
         }
         None => {
+            progress::info("apksigner not found — signing with jarsigner (v1 only)…");
             std::fs::copy(unsigned, out)
                 .with_context(|| format!("copying {} -> {}", unsigned.display(), out.display()))?;
             sign_v1(out, &ks.path, &ks.password, &ks.alias).context("signing APK (jarsigner)")?;
-            println!("Signed with jarsigner (v1 only — apksigner not found).");
+            progress::info("signed with jarsigner (v1 only)");
         }
     }
     Ok(())
@@ -54,7 +60,7 @@ fn ensure_keystore(keystore: &Path, storepass: &str, alias: &str) -> Result<()> 
     if keystore.exists() {
         return Ok(());
     }
-    println!("Generating debug keystore at {}", keystore.display());
+    progress::info(&format!("generating debug keystore at {}", keystore.display()));
     let status = Command::new("keytool")
         .args(["-genkeypair", "-keystore"])
         .arg(keystore)
