@@ -9,11 +9,12 @@ compatible server. It is **not affiliated with, endorsed by or sponsored by
 Supercell**. "Hay Day" and "Supercell" are trademarks of their owners and are
 used here only to describe what the tool is compatible with.
 
+The tool is intended for use with [hd-server](https://github.com/eliaswen/hd-server), but it can work with any compatible server.
+
 ## What it does not contain
 
 - No game code, assets, libraries or APKs. You must supply an APK you
   obtained lawfully yourself.
-- No server. This tool only modifies the client package.
 - No patched APKs, key material or download links.
 
 ## Notice
