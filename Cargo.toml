@@ -10,3 +10,24 @@ anyhow = "1.0.95"
 clap = { version = "4.5.23", features = ["derive"] }
 zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 sha2 = "0.11.1"
+
+[package.metadata.deb]
+maintainer = "Elias Wendland <193786789+eliaswen@users.noreply.github.com>"
+copyright = "Elias Wendland"
+section = "utils"
+depends = "$auto"
+# Signing needs the Android build-tools or a JDK.
+suggests = "apksigner, zipalign, default-jdk-headless"
+assets = [
+    ["target/release/hd-patcher", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/hd-patcher/", "644"],
+    ["LEGAL.md", "usr/share/doc/hd-patcher/", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/hd-patcher", dest = "/usr/bin/hd-patcher", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/hd-patcher/README.md", mode = "644", doc = true },
+    { source = "LEGAL.md", dest = "/usr/share/doc/hd-patcher/LEGAL.md", mode = "644", doc = true },
+    { source = "LICENSE", dest = "/usr/share/licenses/hd-patcher/LICENSE", mode = "644", doc = true },
+]

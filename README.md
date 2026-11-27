@@ -66,6 +66,13 @@ pattern is ambiguous or missing. Other versions are rejected, not guessed at.
 
 The tool refuses to produce an output if it applied no redirection edit.
 
+## Install
+
+Each [release](https://github.com/eliaswen/hd-patcher/releases) has archives for
+Linux, macOS and Windows. On Linux you can install from the signed apt or dnf
+repository instead; [eliaswen.github.io/hd-patcher](https://eliaswen.github.io/hd-patcher/)
+has the setup commands.
+
 ## Build
 
 ```sh
