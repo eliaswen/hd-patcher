@@ -60,16 +60,20 @@ pattern is ambiguous or missing. Other versions are rejected, not guessed at.
 6. **`--bootstrap-url`:** rewrites the native `/env_settings` bootstrap URL to
    your base URL (`scheme://host[:port]`). The new `host:port` must not be longer
    than the original.
-7. **Aligns and signs:** with Android SDK `zipalign` + `apksigner`
-   (v1+v2+v3) if found, otherwise `jarsigner` (v1 only). A debug keystore is
-   created on first use if it does not exist.
+7. **Aligns and signs**, built in, with no JDK or Android SDK needed:
+   uncompressed entries are aligned to 4 bytes and native libraries to 16 KiB
+   (as `zipalign -P 16`), then the APK gets a v1 (JAR) signature and an APK
+   Signature Scheme v2 signature. Like `apksigner`, the v1 digests are SHA-1
+   when the APK's `minSdkVersion` is below 18 (it is 16 for build 1598) and
+   SHA-256 otherwise. The key comes from a PKCS#12 keystore; a new one with a
+   2048-bit RSA key is created on first use if it does not exist.
 
 The tool refuses to produce an output if it applied no redirection edit.
 
 ## Install
 
 Each [release](https://github.com/eliaswen/hd-patcher/releases) has archives for
-Linux, macOS and Windows. On Linux you can install from the signed apt or dnf
+Linux, macOS, Windows and Android (arm64 and x86_64, for Termux or `adb shell`). On Linux you can install from the signed apt or dnf
 repository instead; [eliaswen.github.io/hd-patcher](https://eliaswen.github.io/hd-patcher/)
 has the setup commands.
 
@@ -79,9 +83,37 @@ has the setup commands.
 cargo build --release
 ```
 
-Requires a recent stable Rust toolchain. For signing you need either the
-Android SDK build-tools (`apksigner`, `zipalign`, found via `ANDROID_HOME` /
-`ANDROID_SDK_ROOT` or `PATH`) or a JDK (`keytool`, `jarsigner`).
+Requires a recent stable Rust toolchain, and nothing else: signing is done
+in Rust. For Android, build with [cargo-ndk](https://github.com/bbqsrc/cargo-ndk):
+
+```sh
+cargo ndk -t arm64-v8a -P 24 build --release
+```
+
+## Library
+
+The crate is also a library, so an app can patch on the device itself:
+
+```rust
+use hd_patcher::{Options, NativeOptions, signing::SigningKey, progress::Silent};
+
+let inspection = hd_patcher::inspect("hayday.apk".as_ref())?;
+assert!(inspection.is_patchable()); // the verified 1.43.150 build 1598
+
+let (key, _created) = SigningKey::load_or_create("signing.p12".as_ref(), "android", "haydaydebug")?;
+let options = Options {
+    host: "127.0.0.1".into(),
+    port: 9339,
+    native: Some(NativeOptions {
+        key: hd_patcher::parse_key(server_public_key_hex)?,
+        allow_local_ranges: true,
+        bootstrap_url: Some("http://127.0.0.1:8080".into()),
+    }),
+};
+hd_patcher::patch("hayday.apk".as_ref(), "patched.apk".as_ref(), &options, &key, &mut Silent)?;
+```
+
+Implement `hd_patcher::progress::Progress` to show progress in your own UI.
 
 ## Usage
 
@@ -103,7 +135,7 @@ hd-patcher \
 | `--server-public-key` | 64 hex characters, your server's X25519 public key. |
 | `--allow-local-ranges` | Allow private-IPv4 servers (needs the key option). |
 | `--bootstrap-url` | Replace the native `/env_settings` base URL (needs the key option). |
-| `--keystore`, `--storepass`, `--alias` | Signing key (defaults: `debug.keystore`, `android`, `haydaydebug`). Debug defaults only; use your own key for anything else. |
+| `--keystore`, `--storepass`, `--alias` | PKCS#12 signing keystore (defaults: `debug.keystore`, `android`, `haydaydebug`), created if absent. Keystores made by `keytool` (PKCS#12, its default since JDK 9) work; convert a legacy JKS one with `keytool -importkeystore -deststoretype pkcs12`. Debug defaults only; use your own key for anything else. |
 
 Without `--server-public-key` only the CSV edit is applied.
 
@@ -123,8 +155,11 @@ cargo test
 ```
 
 Tests that need real game files are skipped unless you point them at your own
-copies: `HD_ARM64_APK` (arm64 APK), `HD_X86_LIBG` and `HD_ARM64_LIBG`
-(extracted `libg.so`).
+copies: `HD_ARM64_APK` and `HD_X86_APK` (APKs), `HD_X86_LIBG` and
+`HD_ARM64_LIBG` (extracted `libg.so`). When the Android SDK is installed
+(`ANDROID_HOME`, or `~/Android/Sdk`), every APK the tests produce is also
+checked with `apksigner verify`; with a JDK, keystores are cross-checked with
+`keytool`.
 
 ## AI Usage
 

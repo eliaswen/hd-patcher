@@ -31,6 +31,12 @@ impl Abi {
             _ => None,
         }
     }
+
+    /// SHA-256 (hex) of the one `libg.so` build this ABI's edits are verified
+    /// against; any other library is rejected before anything is written.
+    pub fn verified_sha256(self) -> &'static str {
+        self.build().0
+    }
 }
 
 /// True for any `lib/<abi>/libg.so` entry, supported ABI or not.
@@ -39,6 +45,7 @@ pub fn is_libg(name: &str) -> bool {
 }
 
 /// Native edits to apply to every supported `libg.so`.
+#[derive(Debug, Clone)]
 pub struct Options {
     /// Replacement server public key (X25519, 32 bytes).
     pub key: [u8; 32],

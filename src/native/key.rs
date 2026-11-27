@@ -32,7 +32,7 @@ const CLUSTER_GAP: usize = 0x4000;
 
 impl Abi {
     /// (SHA-256 of the original library, executable segment file range).
-    fn build(self) -> (&'static str, Range<usize>) {
+    pub(super) fn build(self) -> (&'static str, Range<usize>) {
         match self {
             Self::X86 => (
                 "00146c7fbad5a9ba97ee401a29a4d87d045bcebae7ab0f9123ff11e2a80ccd8a",

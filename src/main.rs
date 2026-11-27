@@ -1,20 +1,13 @@
-//! Repackage and sign a Hay Day APK so it connects to a custom server.
-//!
-//! - [`apk`]: repackaging and the settings-CSV edit.
-//! - [`native`]: edits to `libg.so` (server key, integrity check, bootstrap URL,
-//!   local-range filters) for the supported 1.43.150 build 1598, x86 and arm64-v8a.
-//! - [`signing`]: zipalign + apksigner, with a jarsigner fallback.
-
-mod apk;
-mod native;
-mod progress;
-mod signing;
+//! Command-line front end of the [`hd_patcher`] library.
 
 use std::path::PathBuf;
 use std::time::Instant;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Result, bail};
 use clap::Parser;
+
+use hd_patcher::progress::{self, Console, Progress};
+use hd_patcher::signing::{self, SigningKey};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -57,30 +50,27 @@ struct Args {
     #[arg(long)]
     bootstrap_url: Option<String>,
 
-    /// Keystore path to sign with (created if absent).
+    /// PKCS#12 keystore to sign with (created with a new RSA key if absent).
     #[arg(long, default_value = "debug.keystore")]
     keystore: PathBuf,
 
     /// Keystore + key password (debug only).
-    #[arg(long, default_value = "android")]
+    #[arg(long, default_value = signing::DEFAULT_PASSWORD)]
     storepass: String,
 
     /// Key alias.
-    #[arg(long, default_value = "haydaydebug")]
+    #[arg(long, default_value = signing::DEFAULT_ALIAS)]
     alias: String,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     let started = Instant::now();
-
-    if !args.apk.exists() {
-        bail!("input APK does not exist: {}", args.apk.display());
-    }
+    let mut console = Console::new();
 
     let native = match args.server_public_key.as_deref() {
-        Some(hex) => Some(native::Options {
-            key: native::parse_key(hex)?,
+        Some(hex) => Some(hd_patcher::NativeOptions {
+            key: hd_patcher::parse_key(hex)?,
             allow_local_ranges: args.allow_local_ranges,
             bootstrap_url: args.bootstrap_url.clone(),
         }),
@@ -96,33 +86,19 @@ fn main() -> Result<()> {
     };
 
     println!("hd-patcher: {} -> {}", args.apk.display(), args.out.display());
-    progress::info(&format!("target {}:{}", args.host, args.port));
+    console.info(&format!("target {}:{}", args.host, args.port));
 
-    // 1. Repackage into an unsigned, patched APK (old signature stripped).
-    let unsigned = args.out.with_extension("unsigned.apk");
-    let options = apk::Options {
+    let (key, created) = SigningKey::load_or_create(&args.keystore, &args.storepass, &args.alias)?;
+    if created {
+        console.info(&format!("generated a new signing key in {}", args.keystore.display()));
+    }
+
+    let options = hd_patcher::Options {
         host: args.host.clone(),
         port: args.port,
         native,
     };
-    progress::step(1, 2, "Repackaging APK");
-    let report = apk::repackage(&args.apk, &unsigned, &options).context("repackaging APK")?;
-
-    if report.edits.is_empty() {
-        bail!("no redirection edit was applied — refusing to produce an APK that still points at the original servers");
-    }
-
-    // 2. Align and sign.
-    let keystore = signing::Keystore {
-        path: args.keystore,
-        password: args.storepass,
-        alias: args.alias,
-    };
-    progress::step(2, 2, "Aligning and signing");
-    let sign_start = Instant::now();
-    signing::sign(&unsigned, &args.out, &keystore)?;
-    let _ = std::fs::remove_file(&unsigned);
-    progress::done("signed", sign_start.elapsed());
+    hd_patcher::patch(&args.apk, &args.out, &options, &key, &mut console)?;
 
     println!(
         "\nDone in {}. Patched + signed APK: {}",

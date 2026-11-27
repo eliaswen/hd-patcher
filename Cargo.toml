@@ -10,14 +10,20 @@ anyhow = "1.0.95"
 clap = { version = "4.6.10", features = ["derive"] }
 zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 sha2 = "0.11.2"
+rsa = { version = "0.10", features = ["pkcs1v15"] }
+p12-keystore = "0.4"
+sha1 = "0.11"
+base64 = "0.22"
+getrandom = { version = "0.4", features = ["sys_rng"] }
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 
 [package.metadata.deb]
 maintainer = "Elias Wendland <193786789+eliaswen@users.noreply.github.com>"
 copyright = "Elias Wendland"
 section = "utils"
 depends = "$auto"
-# Signing needs the Android build-tools or a JDK.
-suggests = "apksigner, zipalign, default-jdk-headless"
 assets = [
     ["target/release/hd-patcher", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/hd-patcher/", "644"],
@@ -31,3 +37,10 @@ assets = [
     { source = "LEGAL.md", dest = "/usr/share/doc/hd-patcher/LEGAL.md", mode = "644", doc = true },
     { source = "LICENSE", dest = "/usr/share/licenses/hd-patcher/LICENSE", mode = "644", doc = true },
 ]
+
+# RSA key generation is very slow without optimisation.
+[profile.dev.package.crypto-bigint]
+opt-level = 3
+
+[profile.dev.package.rsa]
+opt-level = 3
