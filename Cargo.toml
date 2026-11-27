@@ -7,9 +7,9 @@ description = "Repackage and sign a Hay Day APK so it connects to a custom serve
 
 [dependencies]
 anyhow = "1.0.95"
-clap = { version = "4.5.23", features = ["derive"] }
+clap = { version = "4.6.10", features = ["derive"] }
 zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
-sha2 = "0.11.1"
+sha2 = "0.11.2"
 
 [package.metadata.deb]
 maintainer = "Elias Wendland <193786789+eliaswen@users.noreply.github.com>"
